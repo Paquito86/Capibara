@@ -1,5 +1,5 @@
 services:
-  web:
+  api:
     image: ghcr.io/paquito86/capibara:master
     container_name: capibara-api
     environment:
