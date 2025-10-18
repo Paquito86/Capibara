@@ -1,0 +1,30 @@
+services:
+  web:
+    image: ghcr.io/paquito86/capibara:master
+    container_name: capibara-api
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Production
+    # ports:
+    #  - "8086:8080"
+    restart: unless-stopped
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      # HTTP
+      - "traefik.http.routers.capibara.entrypoints=web"
+      - "traefik.http.routers.capibara.rule=Host(`capibara.server28.alphatechs.net`)"
+      - "traefik.http.routers.capibara.middlewares=capibara_https"
+      - "traefik.http.middlewares.capibara_https.redirectscheme.scheme=https"
+      # HTTPS
+      - "traefik.http.routers.capibara-https.entrypoints=websecure"
+      - "traefik.http.routers.capibara-https.rule=Host(`capibara.server28.alphatechs.net`)"
+      - "traefik.http.routers.capibara-https.tls=true"
+      - "traefik.http.routers.capibara-https.tls.certresolver=production"
+      - "traefik.http.services.capibara-https.loadbalancer.server.port=8080"
+      - "traefik.docker.network=traefik"
+
+networks:
+  traefik:
+    external: true
