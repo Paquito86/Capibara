@@ -1,6 +1,8 @@
 using Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
 using System.Threading;
+using System.Globalization;
+using System.Text.RegularExpressions;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -167,4 +169,100 @@ static string? GetTwoTokenPrefix(string line)
     return parts[0] + " " + parts[1];
 }
 
+app.MapGet("/logs/mssql", async (HttpContext context, string? since) =>
+{
+    if (string.IsNullOrWhiteSpace(since))
+    {
+        return Results.BadRequest("Debe proporcionar el parámetro 'since' (fecha/hora). Ejemplos: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
+    }
+
+    if (!TryParseSince(since, out var sinceInstant))
+    {
+        return Results.BadRequest("Formato de fecha/hora inválido para 'since'. Use ISO 8601, p. ej.: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
+    }
+
+    var logPath = Path.Combine(app.Environment.ContentRootPath, "Files", "backup_mssql.log");
+    if (!File.Exists(logPath))
+    {
+        return Results.Ok(Array.Empty<LogEntry>());
+    }
+
+    var lines = await File.ReadAllLinesAsync(logPath);
+    var list = new List<LogEntry>(capacity: lines.Length);
+
+    foreach (var line in lines)
+    {
+        if (TryParseLogLine(line, out var entry))
+        {
+            if (entry.Timestamp > sinceInstant)
+            {
+                list.Add(entry);
+            }
+        }
+    }
+
+    // order ascending by time for readability
+    list.Sort((a, b) => a.Timestamp.CompareTo(b.Timestamp));
+
+    return Results.Ok(list);
+})
+.Produces<IEnumerable<LogEntry>>(StatusCodes.Status200OK)
+.ProducesProblem(StatusCodes.Status400BadRequest)
+.WithOpenApi(op =>
+{
+    op.Summary = "Obtener logs de MSSQL posteriores a una fecha";
+    op.Description = "Lee `Files/backup_mssql.log` y devuelve en JSON las entradas cuya marca de tiempo es posterior a 'since'. El parámetro 'since' acepta formatos ISO 8601 (ej.: 2025-10-18T13:00:00Z) o 'yyyy-MM-dd HH:mm:ss'.";
+    return op;
+});
+
+static bool TryParseSince(string input, out DateTimeOffset value)
+{
+    // Primero intentar DateTimeOffset (permite Z/offset)
+    if (DateTimeOffset.TryParse(input, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto))
+    {
+        value = dto;
+        return true;
+    }
+
+    // Intentar formato sin offset, asumir hora local
+    if (DateTime.TryParseExact(input, new[] { "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd" }, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt))
+    {
+        value = new DateTimeOffset(dt);
+        return true;
+    }
+
+    value = default;
+    return false;
+}
+
+static bool TryParseLogLine(string line, out LogEntry entry)
+{
+    entry = default;
+    if (string.IsNullOrWhiteSpace(line)) return false;
+
+    var m = LogParsing.LogLineRegex.Match(line);
+    if (!m.Success) return false;
+
+    if (!DateTime.TryParseExact(m.Groups["ts"].Value, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var ts))
+    {
+        return false;
+    }
+
+    var level = m.Groups["level"].Value;
+    var msg = m.Groups["msg"].Value;
+
+    entry = new LogEntry(new DateTimeOffset(ts), level, msg);
+    return true;
+}
+
 app.Run();
+
+public readonly record struct LogEntry(DateTimeOffset Timestamp, string Level, string Message);
+
+file static class LogParsing
+{
+    // Regex to parse lines like: 2025-10-18 13:05:04 level=INFO message="..."
+    internal static readonly Regex LogLineRegex = new(
+        pattern: "^(?<ts>\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})\\s+level=(?<level>\\w+)\\s+message=\"(?<msg>.*)\"$",
+        options: RegexOptions.Compiled);
+}
