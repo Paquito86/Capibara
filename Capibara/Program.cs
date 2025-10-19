@@ -3,6 +3,12 @@ using Microsoft.OpenApi.Any;
 using System.Threading;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authorization;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +21,100 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Capibara API", Version = "v1" });
+
+    // JWT Bearer support in Swagger
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header usando el esquema Bearer. Ejemplo: 'Authorization: Bearer {token}'",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = JwtBearerDefaults.AuthenticationScheme,
+        BearerFormat = "JWT"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// Bind JWT options from configuration
+var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+if (string.IsNullOrWhiteSpace(jwtOptions.Key))
+{
+    throw new InvalidOperationException("JWT Key no configurada. Defina 'Jwt:Key' en appsettings.");
+}
+
+// Authentication/Authorization
+builder.Services
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidAudience = jwtOptions.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
+            ClockSkew = TimeSpan.FromMinutes(1)
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnChallenge = context =>
+            {
+                // Skip default behavior so we can return JSON
+                context.HandleResponse();
+                if (!context.Response.HasStarted)
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    context.Response.ContentType = "application/json";
+                    var problem = new
+                    {
+                        type = "https://httpstatuses.io/401",
+                        title = "Unauthorized",
+                        status = StatusCodes.Status401Unauthorized,
+                        traceId = context.HttpContext.TraceIdentifier
+                    };
+                    return context.Response.WriteAsJsonAsync(problem);
+                }
+                return Task.CompletedTask;
+            },
+            OnForbidden = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                context.Response.ContentType = "application/json";
+                var problem = new
+                {
+                    type = "https://httpstatuses.io/403",
+                    title = "Forbidden",
+                    status = StatusCodes.Status403Forbidden,
+                    traceId = context.HttpContext.TraceIdentifier
+                };
+                return context.Response.WriteAsJsonAsync(problem);
+            }
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    // Require authenticated user by default for all endpoints
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
 });
 
 var app = builder.Build();
@@ -38,6 +138,34 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// Token issuing endpoint (AllowAnonymous)
+app.MapPost("/auth/token", (LoginRequest login, IConfiguration cfg) =>
+{
+    var expectedUser = cfg["Auth:Username"] ?? "";
+    var expectedPass = cfg["Auth:Password"] ?? "";
+
+    if (!string.Equals(login.Username, expectedUser, StringComparison.Ordinal) ||
+        !string.Equals(login.Password, expectedPass, StringComparison.Ordinal))
+    {
+        return Results.Unauthorized();
+    }
+
+    var jwt = CreateToken(jwtOptions, login.Username);
+    return Results.Ok(jwt);
+})
+.Accepts<LoginRequest>("application/json")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized)
+.AllowAnonymous()
+.WithOpenApi(op =>
+{
+    op.Summary = "Obtener un token JWT";
+    op.Description = "Valida credenciales y devuelve un JWT Bearer. Configure credenciales en `Auth:Username` y `Auth:Password`.";
+    return op;
+});
 
 // Endpoint to receive and store SSH public keys (one per line) in Files/authorized_keys
 app.MapPost("/ssh/keys", async (HttpContext context) =>
@@ -143,6 +271,7 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
 .Produces(StatusCodes.Status201Created)
 .ProducesProblem(StatusCodes.Status400BadRequest)
 .Produces(StatusCodes.Status409Conflict)
+.Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi(op =>
 {
     op.Summary = "Registrar clave pública SSH";
@@ -208,6 +337,7 @@ app.MapGet("/logs/mssql", async (HttpContext context, string? since) =>
 })
 .Produces<IEnumerable<LogEntry>>(StatusCodes.Status200OK)
 .ProducesProblem(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi(op =>
 {
     op.Summary = "Obtener logs de MSSQL posteriores a una fecha";
@@ -255,9 +385,60 @@ static bool TryParseLogLine(string line, out LogEntry entry)
     return true;
 }
 
+// Create a signed JWT
+static TokenResponse CreateToken(JwtOptions options, string username)
+{
+    var now = DateTimeOffset.UtcNow;
+    var expires = now.AddMinutes(options.ExpireMinutes <= 0 ? 60 : options.ExpireMinutes);
+
+    var claims = new[]
+    {
+        new Claim(JwtRegisteredClaimNames.Sub, username),
+        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+        new Claim(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+    };
+
+    var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(options.Key));
+    var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+    var jwt = new JwtSecurityToken(
+        issuer: options.Issuer,
+        audience: options.Audience,
+        claims: claims,
+        notBefore: now.UtcDateTime,
+        expires: expires.UtcDateTime,
+        signingCredentials: creds);
+
+    return new TokenResponse
+    {
+        Token = new JwtSecurityTokenHandler().WriteToken(jwt),
+        ExpiresAt = expires
+    };
+}
+
 app.Run();
 
 public readonly record struct LogEntry(DateTimeOffset Timestamp, string Level, string Message);
+
+public sealed class JwtOptions
+{
+    public string Issuer { get; set; } = "Capibara";
+    public string Audience { get; set; } = "CapibaraClients";
+    public string Key { get; set; } = string.Empty; // must be configured
+    public int ExpireMinutes { get; set; } = 60;
+}
+
+public sealed class LoginRequest
+{
+    public string Username { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+}
+
+public sealed class TokenResponse
+{
+    public string Token { get; init; } = string.Empty;
+    public DateTimeOffset ExpiresAt { get; init; }
+}
 
 file static class LogParsing
 {
