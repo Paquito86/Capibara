@@ -1,4 +1,4 @@
-using Microsoft.OpenApi.Models;
+Ôªøusing Microsoft.OpenApi.Models;
 using Microsoft.OpenApi.Any;
 using System.Threading;
 using System.Globalization;
@@ -169,7 +169,7 @@ app.MapPost("/auth/token", (LoginRequest login, IConfiguration cfg) =>
 .WithOpenApi(op =>
 {
     op.Summary = "Obtener un token JWT";
-    op.Description = "Valida credenciales y devuelve un JWT Bearer. Puede indicar 'expireMinutes' en el cuerpo (m·ximo 60 dÌas).";
+    op.Description = "Valida credenciales y devuelve un JWT Bearer. Puede indicar 'expireMinutes' en el cuerpo (m√°ximo 60 d√≠as).";
     return op;
 });
 
@@ -183,13 +183,13 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
 
     if (string.IsNullOrWhiteSpace(key))
     {
-        return Results.BadRequest("La clave p˙blica no puede estar vacÌa.");
+        return Results.BadRequest("La clave p√∫blica no puede estar vac√≠a.");
     }
 
     // Must be a single line (one key per line)
     if (key.Contains('\n') || key.Contains('\r'))
     {
-        return Results.BadRequest("La clave debe ser de una sola lÌnea.");
+        return Results.BadRequest("La clave debe ser de una sola l√≠nea.");
     }
 
     // Optional minimal shape check to avoid garbage (common SSH key prefixes)
@@ -226,7 +226,7 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
         var incomingPrefix = GetTwoTokenPrefix(key);
         if (incomingPrefix is null)
         {
-            return Results.BadRequest("Formato de clave SSH inv·lido.");
+            return Results.BadRequest("Formato de clave SSH inv√°lido.");
         }
 
         var sameContentExists = existingLines.Any(l =>
@@ -237,7 +237,7 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
 
         if (sameContentExists)
         {
-            return Results.Conflict("Ya existe una clave idÈntica (aunque con distinto nombre).");
+            return Results.Conflict("Ya existe una clave id√©ntica (aunque con distinto nombre).");
         }
 
         // Ensure each key is on its own line; prepend a newline if the file exists and doesn't end with one
@@ -280,8 +280,8 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
 .Produces(StatusCodes.Status401Unauthorized)
 .WithOpenApi(op =>
 {
-    op.Summary = "Registrar clave p˙blica SSH";
-    op.Description = "Recibe una clave p˙blica SSH en texto plano (una por lÌnea) y la agrega a `Files/authorized_keys`. Si la clave ya existe (igual o con el mismo contenido ignorando el nombre), devuelve 409.";
+    op.Summary = "Registrar clave p√∫blica SSH";
+    op.Description = "Recibe una clave p√∫blica SSH en texto plano (una por l√≠nea) y la agrega a `Files/authorized_keys`. Si la clave ya existe (igual o con el mismo contenido ignorando el nombre), devuelve 409.";
 
     // Document request body as text/plain with an example
     op.RequestBody ??= new Microsoft.OpenApi.Models.OpenApiRequestBody();
@@ -308,12 +308,12 @@ app.MapGet("/logs/mssql", async (HttpContext context, string? since) =>
 {
     if (string.IsNullOrWhiteSpace(since))
     {
-        return Results.BadRequest("Debe proporcionar el par·metro 'since' (fecha/hora). Ejemplos: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
+        return Results.BadRequest("Debe proporcionar el par√°metro 'since' (fecha/hora). Ejemplos: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
     }
 
     if (!TryParseSince(since, out var sinceInstant))
     {
-        return Results.BadRequest("Formato de fecha/hora inv·lido para 'since'. Use ISO 8601, p. ej.: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
+        return Results.BadRequest("Formato de fecha/hora inv√°lido para 'since'. Use ISO 8601, p. ej.: 2025-10-18T13:00:00Z o 2025-10-18 13:00:00");
     }
 
     var logPath = Path.Combine(app.Environment.ContentRootPath, "Files", "backup_mssql.log");
@@ -347,7 +347,7 @@ app.MapGet("/logs/mssql", async (HttpContext context, string? since) =>
 .WithOpenApi(op =>
 {
     op.Summary = "Obtener logs de MSSQL posteriores a una fecha";
-    op.Description = "Lee `Files/backup_mssql.log` y devuelve en JSON las entradas cuya marca de tiempo es posterior a 'since'. El par·metro 'since' acepta formatos ISO 8601 (ej.: 2025-10-18T13:00:00Z) o 'yyyy-MM-dd HH:mm:ss'.";
+    op.Description = "Lee `Files/backup_mssql.log` y devuelve en JSON las entradas cuya marca de tiempo es posterior a 'since'. El par√°metro 'since' acepta formatos ISO 8601 (ej.: 2025-10-18T13:00:00Z) o 'yyyy-MM-dd HH:mm:ss'.";
     return op;
 });
 
