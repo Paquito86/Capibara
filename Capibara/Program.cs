@@ -153,7 +153,13 @@ app.MapPost("/auth/token", (LoginRequest login, IConfiguration cfg) =>
         return Results.Unauthorized();
     }
 
-    var jwt = CreateToken(jwtOptions, login.Username);
+    // Allow client to request expiration in minutes, capped to max 60 days
+    var maxMinutes = (int)TimeSpan.FromDays(60).TotalMinutes; // 60 days
+    var requested = login.ExpireMinutes ?? jwtOptions.ExpireMinutes;
+    if (requested <= 0) requested = jwtOptions.ExpireMinutes;
+    if (requested > maxMinutes) requested = maxMinutes;
+
+    var jwt = CreateToken(jwtOptions, login.Username, requested);
     return Results.Ok(jwt);
 })
 .Accepts<LoginRequest>("application/json")
@@ -163,7 +169,7 @@ app.MapPost("/auth/token", (LoginRequest login, IConfiguration cfg) =>
 .WithOpenApi(op =>
 {
     op.Summary = "Obtener un token JWT";
-    op.Description = "Valida credenciales y devuelve un JWT Bearer. Configure credenciales en `Auth:Username` y `Auth:Password`.";
+    op.Description = "Valida credenciales y devuelve un JWT Bearer. Puede indicar 'expireMinutes' en el cuerpo (máximo 60 días).";
     return op;
 });
 
@@ -386,10 +392,11 @@ static bool TryParseLogLine(string line, out LogEntry entry)
 }
 
 // Create a signed JWT
-static TokenResponse CreateToken(JwtOptions options, string username)
+static TokenResponse CreateToken(JwtOptions options, string username, int expireMinutes)
 {
     var now = DateTimeOffset.UtcNow;
-    var expires = now.AddMinutes(options.ExpireMinutes <= 0 ? 60 : options.ExpireMinutes);
+    var expMinutes = expireMinutes <= 0 ? (options.ExpireMinutes <= 0 ? 60 : options.ExpireMinutes) : expireMinutes;
+    var expires = now.AddMinutes(expMinutes);
 
     var claims = new[]
     {
@@ -432,6 +439,7 @@ public sealed class LoginRequest
 {
     public string Username { get; init; } = string.Empty;
     public string Password { get; init; } = string.Empty;
+    public int? ExpireMinutes { get; init; }
 }
 
 public sealed class TokenResponse
