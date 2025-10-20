@@ -141,6 +141,16 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Public awake endpoint
+app.MapGet("/awake/", () => Results.Text("I'm sleeping!", "text/plain"))
+   .AllowAnonymous()
+   .WithOpenApi(op =>
+   {
+       op.Summary = "Awake probe";
+       op.Description = "Devuelve el texto 'I'm sleeping!'";
+       return op;
+   });
+
 // Token issuing endpoint (AllowAnonymous)
 app.MapPost("/auth/token", (LoginRequest login, IConfiguration cfg) =>
 {
