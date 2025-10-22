@@ -215,7 +215,7 @@ app.MapPost("/ssh/keys", async (HttpContext context) =>
     }
 
     // Resolve authorized_keys path under the app content root
-    var filePath = Path.Combine(app.Environment.ContentRootPath, "Files", "authorized_keys");
+    var filePath = Path.Combine(app.Environment.ContentRootPath, "Files/ssh", "authorized_keys");
 
     await authorizedKeysLock.WaitAsync();
     try
