@@ -142,7 +142,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Public awake endpoint
-app.MapGet("/awake/", () => Results.Text("You woke me up! What the hell do you want, huh?", "text/plain"))
+app.MapGet("/awake/", () => Results.Text("Back to sleep! :)", "text/plain"))
    .AllowAnonymous()
    .WithOpenApi(op =>
    {
