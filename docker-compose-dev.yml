@@ -6,7 +6,7 @@ services:
     container_name: capibara-api
     environment:
       - ASPNETCORE_URLS=http://+:8080
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=Development
     # ports:
     #  - "8086:8080"
     restart: unless-stopped
